@@ -1,290 +1,472 @@
-import pygame,random,math,json,os
-pygame.init()
-W,H=1100,700; screen=pygame.display.set_mode((W,H)); pygame.display.set_caption('ASHFALL: REQUIEM OF THE HOLLOW KING'); clock=pygame.time.Clock()
-F=pygame.font.SysFont('consolas',18); S=pygame.font.SysFont('consolas',14); B=pygame.font.SysFont('consolas',38,True); G=pygame.font.SysFont('consolas',58,True)
-WHITE=(235,235,235);BLACK=(9,11,15);RED=(215,65,70);GREEN=(70,210,100);BLUE=(70,145,235);GOLD=(235,190,55);PURPLE=(165,80,220);CYAN=(65,205,210);GREY=(145,150,160)
-SAVE='ashfall_save.json'; WORLD=(5000,3400)
-REG={'Haven':((25,55,70),(0,0,1450,1050)),'Deadwood':((40,70,45),(0,1050,1450,2350)),'Salt Flats':((112,95,62),(1450,0,3350,1100)),'Blackwater':((30,65,80),(1450,1100,3350,2350)),'Crater':((70,38,70),(3350,0,5000,3400))}
-WEAPONS={'Rusty Blade':(9,.04,100,1,0),'Iron Sabre':(18,.07,110,1.05,180),'Ranger Bow':(25,.15,430,.82,300),'Storm Rifle':(34,.09,600,1.25,520),'Void Carbine':(48,.16,650,1.35,950),'Sunforged':(65,.22,125,1,1500)}
-ARMOR={'Cloth Coat':(2,0,0),'Scrap Vest':(7,15,100),'Ranger Mail':(13,35,350),'Aegis Plate':(23,70,900),'Void Mantle':(32,110,1600)}
-EN={'Ash Rat':(55,8,115,16,18),'Scavenger':(95,14,125,21,30),'Mutant':(170,23,145,28,60),'Ravager':(260,32,175,32,100),'Ash Knight':(390,44,215,35,170),'Void Hound':(550,57,250,38,260),'Ash Witch':(440,50,115,31,230),'Crater Spawn':(720,65,180,42,360)}
-BOSS={'The Warden':(1500,42,115,62,900),'Mother of Ash':(2300,58,145,82,1600),'Hollow King':(3800,78,165,100,3500)}
-QUESTS=[
-('A Rat in the Walls','Kill 8 Ash Rats','kills','Ash Rat',8,120,90),('Old Roots','Collect 5 Ember Roots','item','Ember Root',5,180,130),('Missing Scout','Find the scout in Deadwood','point','scout',1,240,180),('Scrap Economy','Collect 10 Iron Scrap','item','Iron Scrap',10,220,150),('Crystal Fever','Collect 5 Ash Crystals','item','Ash Crystal',5,320,220),('Night Watch','Survive a night outside Haven','night','night',1,300,250),('The Old Road','Reach the Salt Flats','region','Salt Flats',1,350,300),('Broken Relay','Repair 3 relay stations','relay','relay',3,420,350),('A Voice Below','Enter a procedural ruin','dungeon','d1',1,500,450),('Blackwater','Reach Blackwater','region','Blackwater',1,450,400),('The Warden','Defeat the Warden','boss','The Warden',1,800,650),('Warden Core','Recover a Warden Core','item','Warden Core',1,900,700),('Three Keys','Find 3 Moon Shards','item','Moon Shard',3,1000,850),('Hollow Gate','Find the gate in the Crater','point','gate',1,900,750),('Mother of Ash','Defeat Mother of Ash','boss','Mother of Ash',1,1500,1200),('Last Archive','Search an ancient archive','dungeon','d2',1,1200,1000),('Better Weapon','Craft an upgraded weapon','craft','weapon',1,700,650),('Better Life','Craft upgraded armour','craft','armor',1,700,650),('The Betrayal','Choose at the Obsidian Shrine','choice','shrine',1,1000,800),('Ashfall','Reach the Hollow King','point','king',1,1800,1500),('The Hollow King','Defeat the Hollow King','boss','Hollow King',1,4000,3500),('Aftermath','Decide the fate of Eldoria','ending','ending',1,0,0)]
-class P:
- def __init__(self,d=None):
-  z=d or {};self.x=z.get('x',820);self.y=z.get('y',560);self.level=z.get('level',1);self.xp=z.get('xp',0);self.need=z.get('need',120);self.hp=z.get('hp',140);self.maxhp=z.get('maxhp',140);self.st=z.get('st',100);self.gold=z.get('gold',120);self.weapon=z.get('weapon','Rusty Blade');self.armor=z.get('armor','Cloth Coat');self.kills=z.get('kills',0);self.crafted=z.get('crafted',0);self.skills=z.get('skills',{'Might':0,'Survival':0,'Arcane':0});self.inv=z.get('inv',{'Medkit':3,'Bomb':1,'Iron Scrap':3,'Ash Crystal':0,'Ancient Gear':0,'Moon Shard':0,'Ember Root':0,'Void Dust':0,'Warden Core':0})
- def data(self):return self.__dict__
- def xpup(self,n,g):
-  self.xp+=n
-  while self.xp>=self.need:self.xp-=self.need;self.level+=1;self.need=int(self.need*1.3);self.maxhp+=15;self.hp=self.maxhp;g.msg('LEVEL UP! Press K for skills.',GOLD,3)
- @property
- def dmg(self):return WEAPONS[self.weapon][0]+self.skills['Might']*5+(self.level-1)*2
- @property
- def crit(self):return WEAPONS[self.weapon][1]+self.skills['Might']*.025+self.skills['Arcane']*.015
- @property
- def rng(self):return WEAPONS[self.weapon][2]+self.skills['Arcane']*25
- @property
- def defense(self):return ARMOR[self.armor][0]+self.skills['Survival']*2
-class E:
- def __init__(self,n,x,y,g,boss=False,elite=False):
-  self.name=n;self.x=x;self.y=y;self.boss=boss;self.elite=elite;self.cd=0;h,d,s,r,xp=(BOSS[n] if boss else EN[n]);q=(1+(g.day-1)*.045+(g.p.level-1)*.035)*(1.55 if elite else 1);self.hp=self.maxhp=int(h*q);self.dam=int(d*q);self.spd=s;self.rad=r;self.xp=int(xp*q);self.gold=max(8,int(xp*.42))
- def update(self,dt,g):
-  self.cd=max(0,self.cd-dt);dx=g.p.x-self.x;dy=g.p.y-self.y;d=max(1,math.hypot(dx,dy))
-  if d<850:self.x+=dx/d*self.spd*dt;self.y+=dy/d*self.spd*dt
-  if d<self.rad+17 and self.cd<=0:g.damage(max(1,self.dam-g.p.defense//3));self.cd=.5 if self.boss else .9
- def draw(self,cx,cy):
-  x,y=int(self.x-cx),int(self.y-cy);c=PURPLE if self.boss else GOLD if self.elite else RED;pygame.draw.circle(screen,c,(x,y),self.rad);pygame.draw.circle(screen,BLACK,(x,y),max(4,self.rad//3));pygame.draw.rect(screen,BLACK,(x-self.rad,y-self.rad-10,self.rad*2,5));pygame.draw.rect(screen,GREEN,(x-self.rad,y-self.rad-10,int(self.rad*2*self.hp/self.maxhp),5))
+import json, os, random, textwrap, time
+
+# ASHFALL: REQUIEM OF THE HOLLOW KING
+# A single-file, terminal RPG. Python 3 only - no external packages.
+
+SAVE = 'ashfall_save.json'
+random.seed()
+
+WEAPONS = {
+    'Rusty Blade': {'power': 8, 'speed': 2, 'crit': 3, 'value': 20, 'tag': 'balanced'},
+    'Iron Sabre': {'power': 14, 'speed': 3, 'crit': 5, 'value': 100, 'tag': 'fast'},
+    'Ranger Bow': {'power': 19, 'speed': 2, 'crit': 10, 'value': 180, 'tag': 'precise'},
+    'Storm Rifle': {'power': 27, 'speed': 2, 'crit': 8, 'value': 360, 'tag': 'reliable'},
+    'Void Carbine': {'power': 36, 'speed': 3, 'crit': 14, 'value': 700, 'tag': 'rare'},
+    'Sunforged': {'power': 48, 'speed': 2, 'crit': 18, 'value': 1400, 'tag': 'legendary'},
+}
+ARMOUR = {
+    'Cloth Coat': {'def': 2, 'hp': 0, 'value': 20},
+    'Scrap Vest': {'def': 6, 'hp': 10, 'value': 80},
+    'Ranger Mail': {'def': 11, 'hp': 25, 'value': 240},
+    'Aegis Plate': {'def': 19, 'hp': 50, 'value': 650},
+    'Void Mantle': {'def': 27, 'hp': 85, 'value': 1200},
+}
+ENEMIES = {
+    'Ash Rat': (28, 7, 12, 20), 'Scavenger': (48, 10, 20, 30),
+    'Mutant': (85, 15, 35, 55), 'Ravager': (130, 20, 55, 90),
+    'Ash Knight': (210, 28, 90, 150), 'Void Hound': (300, 34, 130, 210),
+    'Ash Witch': (240, 40, 150, 240), 'Crater Spawn': (430, 48, 230, 380),
+}
+BOSSES = {
+    'The Warden': (900, 35, 650, 700),
+    'Mother of Ash': (1500, 48, 1200, 1200),
+    'Hollow King': (2400, 65, 3000, 2500),
+}
+REGIONS = ['Haven', 'Deadwood', 'Salt Flats', 'Blackwater', 'The Crater']
+
+QUESTS = [
+    ('A Rat in the Walls', 'Kill 5 Ash Rats', 'kill', 'Ash Rat', 5, 80),
+    ('The Missing Scout', 'Search Deadwood for a missing scout', 'event', 'scout', 1, 120),
+    ('Old Roots', 'Collect 5 Ember Roots', 'item', 'Ember Root', 5, 130),
+    ('Scrap Economy', 'Collect 8 Iron Scrap', 'item', 'Iron Scrap', 8, 150),
+    ('Crystal Fever', 'Collect 4 Ash Crystals', 'item', 'Ash Crystal', 4, 200),
+    ('The Old Road', 'Reach the Salt Flats', 'region', 'Salt Flats', 1, 250),
+    ('Broken Relay', 'Repair 3 ancient relays', 'relay', 'relay', 3, 300),
+    ('A Voice Below', 'Complete a procedural ruin', 'dungeon', 'ruin', 1, 350),
+    ('Blackwater', 'Reach Blackwater', 'region', 'Blackwater', 1, 350),
+    ('The Warden', 'Defeat The Warden', 'boss', 'The Warden', 1, 700),
+    ('Warden Core', 'Recover the Warden Core', 'item', 'Warden Core', 1, 600),
+    ('Three Keys', 'Collect 3 Moon Shards', 'item', 'Moon Shard', 3, 800),
+    ('The Crater Gate', 'Find the hidden gate', 'event', 'gate', 1, 700),
+    ('Mother of Ash', 'Defeat Mother of Ash', 'boss', 'Mother of Ash', 1, 1200),
+    ('The Last Archive', 'Complete an ancient archive dungeon', 'dungeon', 'archive', 1, 900),
+    ('Forge of Ash', 'Craft an improved weapon', 'craft', 'weapon', 1, 600),
+    ('Living Armour', 'Craft improved armour', 'craft', 'armour', 1, 600),
+    ('The Obsidian Choice', 'Make a choice at the shrine', 'choice', 'shrine', 1, 900),
+    ('The Final Vault', 'Reach the Hollow King', 'event', 'king', 1, 1200),
+    ('The Hollow King', 'Defeat the Hollow King', 'boss', 'Hollow King', 1, 3000),
+    ('A New Dawn', 'Choose the fate of Eldoria', 'ending', 'ending', 1, 0),
+    ('The Historian', 'Learn the truth from Finch', 'choice', 'history', 1, 300),
+    ('Debt Collector', 'Earn 1000 gold', 'gold', 'gold', 1000, 500),
+    ('Master Explorer', 'Visit every region', 'explore', 'regions', 5, 1000),
+]
+
+class Player:
+    def __init__(self, data=None):
+        d = data or {}
+        self.name = d.get('name', 'Wanderer')
+        self.level = d.get('level', 1); self.xp = d.get('xp', 0); self.need = d.get('need', 100)
+        self.hp = d.get('hp', 100); self.max_hp = d.get('max_hp', 100)
+        self.stamina = d.get('stamina', 100); self.gold = d.get('gold', 80)
+        self.weapon = d.get('weapon', 'Rusty Blade'); self.armour = d.get('armour', 'Cloth Coat')
+        self.inv = d.get('inv', {'Iron Scrap': 3, 'Ember Root': 0, 'Ash Crystal': 0, 'Ancient Gear': 0, 'Moon Shard': 0, 'Void Dust': 0, 'Warden Core': 0, 'Medkit': 3})
+        self.skills = d.get('skills', {'Might': 0, 'Survival': 0, 'Insight': 0})
+        self.kills = d.get('kills', 0); self.crafted = d.get('crafted', 0)
+        self.regions = d.get('regions', []); self.flags = d.get('flags', {})
+
+    def pack(self): return self.__dict__.copy()
+    @property
+    def power(self): return WEAPONS[self.weapon]['power'] + self.level * 2 + self.skills['Might'] * 5
+    @property
+    def defence(self): return ARMOUR[self.armour]['def'] + self.skills['Survival'] * 3
+    @property
+    def crit(self): return WEAPONS[self.weapon]['crit'] + self.skills['Insight'] * 3
+
+    def gain_xp(self, amount):
+        self.xp += amount
+        while self.xp >= self.need:
+            self.xp -= self.need; self.level += 1; self.need = int(self.need * 1.32)
+            self.max_hp += 12; self.hp = self.max_hp
+            print('\n*** LEVEL UP! You are now level', self.level, '***')
+
 class Game:
- def __init__(self):
-  self.p=P();self.day=1;self.hour=8.;self.state='menu';self.region='Haven';self.en=[];self.loot=[];self.npcs=[('Mara',760,550,GOLD),('Dax',1010,420,BLUE),('Sera',1100,650,CYAN),('Rook',1210,520,GOLD),('Finch',620,700,GREEN)];self.msgs=[];self.dialog=None;self.shop=False;self.inv=False;self.skills=False;self.map=False;self.craftui=False;self.drooms=[];self.dp=0;self.relays=[[1750,450,0],[2450,720,0],[2850,1550,0],[3950,850,0]];self.q=[list(x) for x in QUESTS];self.flags={'warden':0,'mother':0,'king':0,'shrine':0,'ending':0};self.play=0;self.spawn()
- def msg(self,t,c=WHITE,d=2):self.msgs.append([t,d,c])
- def reg(self,x,y):
-  for n,(_,r) in REG.items():
-   if r[0]<=x<r[0]+r[2] and r[1]<=y<r[1]+r[3]:return n
-  return 'Wilderness'
- def spawn(self):
-  for n,num in [('Ash Rat',28),('Scavenger',22),('Mutant',15),('Ravager',10),('Ash Knight',6),('Void Hound',4),('Ash Witch',4),('Crater Spawn',3)]:
-   for _ in range(num):
-    x,y=random.randint(150,4850),random.randint(150,3250)
-    if self.reg(x,y)=='Haven':x+=900
-    self.en.append(E(n,x,y,self,elite=random.random()<.07))
- def cam(self):return max(0,min(WORLD[0]-W,self.p.x-W/2)),max(0,min(WORLD[1]-H,self.p.y-H/2))
- def damage(self,n):
-  if getattr(self,'ifr',0)>0:return
-  self.p.hp-=n;self.ifr=.35
-  if self.p.hp<=0:self.p.hp=self.p.maxhp//2;self.p.x,self.p.y=820,560;self.p.gold=max(0,self.p.gold-80);self.msg('Knocked out. Back to Haven. -80g.',RED,4)
- def progress(self,kind,target,n=1):
-  for i,q in enumerate(self.q):
-   if q[2]>=q[4] or q[2]!=kind and q[2] in ('kills','item','point','night','region','relay','dungeon','boss','craft','choice','ending'):pass
-   if q[2]>=q[4] or q[2]!=kind or q[3]!=target:continue
-   q[4]=min(q[4],q[4]+n) if False else q[4]
-   # progress is stored in q[7], appended lazily
-   if len(q)<8:q.append(0)
-   if kind=='item':q[7]=min(q[4],self.p.inv.get(target,0))
-   else:q[7]=min(q[4],q[7]+n)
-   if q[7]>=q[4]:self.complete(i)
- def complete(self,i):
-  q=self.q[i]
-  if len(q)<8:q.append(q[4])
-  if q[7]>=q[4] and q[6]>=0:q[6]=-1;self.p.gold+=q[5];self.p.xpup(q[6]*-1 if False else q[5]//2,self);self.msg('QUEST COMPLETE: '+q[0]+' +'+str(q[5])+'g',GOLD,4)
- def kill(self,e):
-  if e not in self.en:return
-  self.en.remove(e);self.p.kills+=1;self.p.gold+=e.gold;self.p.xpup(e.xp,self);self.progress('kills',e.name)
-  if random.random()<.45:
-   d=random.choice(['Iron Scrap','Ember Root','Ash Crystal','Ancient Gear','Void Dust']);self.loot.append([e.x,e.y,d])
-  if e.boss:
-   self.progress('boss',e.name)
-   if e.name=='The Warden':self.flags['warden']=1;self.p.inv['Warden Core']+=1
-   if e.name=='Mother of Ash':self.flags['mother']=1;self.p.inv['Moon Shard']+=2
-   if e.name=='Hollow King':self.flags['king']=1;self.start_end()
- def attack(self):
-  if getattr(self,'atkcd',0)>0:return
-  w=WEAPONS[self.p.weapon];self.atkcd=.2/w[3];cx,cy=self.cam();mx,my=pygame.mouse.get_pos();dx,dy=mx+cx-self.p.x,my+cy-self.p.y;d=max(1,math.hypot(dx,dy));tar=None;best=.72
-  for e in self.en:
-   ex,ey=e.x-self.p.x,e.y-self.p.y;ed=math.hypot(ex,ey)
-   if ed<=self.p.rng and ex*dx+ey*dy>best*ed*d:tar=e;best=(ex*dx+ey*dy)/(ed*d)
-  if tar:
-   dam=self.p.dmg+random.randint(-4,7)
-   if random.random()<self.p.crit:dam*=2;self.msg('CRITICAL!',GOLD)
-   tar.hp-=dam
-   if tar.hp<=0:self.kill(tar)
- def interact(self):
-  for n,x,y,c in self.npcs:
-   if math.hypot(self.p.x-x,self.p.y-y)<90:
-    if n=='Dax':self.shop=True;return
-    if n=='Mara':self.quest_dialog();return
-    lines={'Sera':('The Ashfall changed the rules of reality.','Ask about the Ashfall?'),'Rook':('The Crater is not a crater. It is a door.','Ask about the Crater?'),'Finch':('The machines remember their makers.','Ask about the old world?')}
-    a,b=lines[n];self.dialog=[n,a,b,['Leave','Ask']];return
-  for a in self.loot[:]:
-   if math.hypot(a[0]-self.p.x,a[1]-self.p.y)<65:self.p.inv[a[2]]=self.p.inv.get(a[2],0)+1;self.loot.remove(a);self.progress('item',a[2]);self.msg('Picked up '+a[2],GREEN);return
-  for r in self.relays:
-   if not r[2] and math.hypot(self.p.x-r[0],self.p.y-r[1])<85:
-    if self.p.inv.get('Iron Scrap',0)>=2:self.p.inv['Iron Scrap']-=2;r[2]=1;self.progress('relay','relay');self.msg('Relay repaired.',GREEN)
-    else:self.msg('Need 2 Iron Scrap.',RED)
-    return
-  if self.region=='Blackwater' and math.hypot(self.p.x-3000,self.p.y-1600)<200:self.boss('The Warden',3000,1600)
-  elif self.region=='Crater' and self.flags['warden'] and math.hypot(self.p.x-4100,self.p.y-2100)<240:self.boss('Mother of Ash',4100,2100)
-  elif self.region=='Crater' and self.flags['mother'] and math.hypot(self.p.x-4450,self.p.y-700)<250:self.boss('Hollow King',4450,700)
-  elif self.region=='Crater' and math.hypot(self.p.x-3700,self.p.y-2750)<180:self.shrine()
-  elif self.region in ('Deadwood','Blackwater','Crater') and random.random()<.12:self.dungeon()
- def boss(self,n,x,y):
-  if not any(e.boss and e.name==n for e in self.en):self.en.append(E(n,x,y,self,boss=True));self.msg(n.upper()+' AWAKENS.',RED,5)
- def quest_dialog(self):
-  for i,q in enumerate(self.q):
-   if len(q)<8:q.append(0)
-   if q[6]>=0:self.dialog=['MARA',q[0],q[1],[f'Accept quest','Leave'],i];return
-  self.dialog=['MARA','You have done all I can ask.','The end is near.',['Leave']]
- def choose(self,n):
-  if not self.dialog:return
-  if self.dialog[0]=='MARA':self.dialog=None;return
-  text=self.dialog[1]
-  if n==1:self.dialog=[self.dialog[0],'You have chosen to listen.','Knowledge changes what comes next.',['Leave']]
-  else:self.dialog=None
- def shrine(self):self.dialog=['OBSIDIAN SHRINE','A voice offers three futures.','This choice changes the final ending.',['Free the Ash','Bind the Ash','Destroy it']];self.choice='shrine'
- def choice(self,n):self.flags['shrine']=n+1;self.progress('choice','shrine');self.dialog=None;self.msg(['The chains crack.','The chains tighten.','The shrine burns.'][n],GOLD,4)
- def dungeon(self):
-  self.drooms=[];x=y=0;seen={(0,0)}
-  for _ in range(120):
-   dx,dy=random.choice([(1,0),(-1,0),(0,1),(0,-1)]);nx,ny=x+dx,y+dy
-   if -5<nx<6 and -4<ny<5:x,y=nx,ny;seen.add((x,y))
-  self.drooms=list(seen);self.dp=0;self.state='dungeon';self.msg('A procedural ruin unfolds beneath you.',PURPLE,4);self.progress('dungeon','d1')
- def craft(self,kind):
-  rec={'weapon':('Void Carbine',{'Iron Scrap':12,'Ash Crystal':6,'Ancient Gear':4,'Void Dust':2}),'armor':('Void Mantle',{'Iron Scrap':15,'Ash Crystal':8,'Moon Shard':2,'Void Dust':4})}[kind];n,need=rec
-  if all(self.p.inv.get(k,0)>=v for k,v in need.items()):
-   for k,v in need.items():self.p.inv[k]-=v
-   if kind=='weapon':self.p.weapon=n
-   else:self.p.armor=n
-   self.p.crafted+=1;self.progress('craft',kind);self.msg('CRAFTED '+n+'!',GOLD,4)
-  else:self.msg('Missing materials.',RED)
- def update(self,dt):
-  if self.state not in ('playing','dungeon'):return
-  self.play+=dt;self.atkcd=max(0,getattr(self,'atkcd',0)-dt);self.ifr=max(0,getattr(self,'ifr',0)-dt)
-  if self.state=='dungeon':return
-  self.hour+=dt/18
-  if self.hour>=24:self.hour-=24;self.day+=1;self.progress('night','night')
-  k=pygame.key.get_pressed();dx=int(k[pygame.K_d])-int(k[pygame.K_a]);dy=int(k[pygame.K_s])-int(k[pygame.K_w]);m=math.hypot(dx,dy);sp=340 if k[pygame.K_LSHIFT] and self.p.st>0 else 225
-  if m:self.p.x+=dx/m*sp*dt;self.p.y+=dy/m*sp*dt;self.p.st=max(0,self.p.st-(40*dt if sp>300 else 0))
-  else:self.p.st=min(100,self.p.st+28*dt)
-  self.p.x=max(25,min(WORLD[0]-25,self.p.x));self.p.y=max(25,min(WORLD[1]-25,self.p.y));old=self.region;self.region=self.reg(self.p.x,self.p.y)
-  if old!=self.region:self.msg('Entered '+self.region,CYAN,3);self.progress('region',self.region)
-  for e in self.en[:]:e.update(dt,self)
-  if len(self.en)<100 and random.random()<dt*.28:self.en.append(E(random.choice(list(EN)),random.randint(100,4900),random.randint(100,3300),self,elite=random.random()<.06))
-  for m in self.msgs:m[1]-=dt
-  self.msgs=[m for m in self.msgs if m[1]>0]
- def panel(self,t,x,y,w,h):pygame.draw.rect(screen,(20,23,29),(x,y,w,h));pygame.draw.rect(screen,(90,95,105),(x,y,w,h),2);screen.blit(B.render(t,1,WHITE),(x+20,y+15))
- def hud(self):
-  p=self.p;pygame.draw.rect(screen,BLACK,(10,10,360,105));pygame.draw.rect(screen,RED,(25,30,240,18));pygame.draw.rect(screen,GREEN,(25,30,int(240*p.hp/p.maxhp),18));pygame.draw.rect(screen,BLUE,(25,55,int(240*p.xp/max(1,p.need)),10));screen.blit(S.render(f'HP {p.hp}/{p.maxhp}  LV {p.level}  XP {p.xp}/{p.need}',1,WHITE),(25,72));screen.blit(S.render(f'{self.region} | Day {self.day} | {int(self.hour):02d}:00 | {p.gold}g',1,WHITE),(390,18));screen.blit(S.render(f'{p.weapon} {p.dmg}DMG | {p.armor} {p.defense}DEF',1,WHITE),(390,42));screen.blit(S.render('WASD move | Shift sprint | Mouse attack | E interact | Q heal | K skills | I inventory | M map | C craft | F5/F9 save/load',1,WHITE),(390,68));y=H-80
-  for t,d,c in self.msgs[-3:]:a=F.render(t,1,c);screen.blit(a,(W//2-a.get_width()//2,y));y-=26
- def worlddraw(self):
-  cx,cy=self.cam();screen.fill(BLACK);tile=80
-  for x in range(0,WORLD[0],tile):
-   for y in range(0,WORLD[1],tile):
-    r=self.reg(x+40,y+40);c=REG.get(r,((50,50,50),))[0];v=4 if (x//tile+y//tile)%2 else 0;pygame.draw.rect(screen,tuple(min(255,a+v) for a in c),(x-cx,y-cy,tile,tile))
-  for x,y,d in self.relays:pygame.draw.rect(screen,GREEN if d else GOLD,(x-cx-12,y-cy-12,24,24))
-  for e in self.en:e.draw(cx,cy)
-  for x,y,n in self.loot:pygame.draw.rect(screen,GOLD,(x-cx-6,y-cy-6,12,12))
-  for n,x,y,c in self.npcs:pygame.draw.circle(screen,c,(int(x-cx),int(y-cy)),18);screen.blit(S.render(n,1,WHITE),(x-cx-25,y-cy-38))
-  pygame.draw.circle(screen,BLUE,(int(self.p.x-cx),int(self.p.y-cy)),17);self.hud()
- def overlay(self):
-  if self.inv:
-   self.panel('INVENTORY',120,65,860,570);y=130
-   for n,v in self.p.inv.items():
-    if not n.startswith('_'):screen.blit(F.render(f'{n:<20} x{v}',1,WHITE),(160,y));y+=29
-  if self.skills:
-   self.panel('SKILL TREE',130,70,840,560);screen.blit(F.render('Spend points earned from levels: 1/2/3',1,GOLD),(170,135));ds=['+5 damage / crit','+2 defence / stamina','+25 range / crit'];ns=['Might','Survival','Arcane']
-   for i,n in enumerate(ns):y=200+i*105;screen.blit(F.render(f'[{i+1}] {n}  LEVEL {self.p.skills[n]}',1,WHITE),(180,y));screen.blit(S.render(ds[i],1,GREY),(180,y+35))
-  if self.map:
-   self.panel('MAP',100,60,900,570)
-   for n,(c,r) in REG.items():pygame.draw.rect(screen,c,(150+r[0]/7,145+r[1]/8,r[2]/7,r[3]/8));screen.blit(S.render(n,1,WHITE),(155+r[0]/7,150+r[1]/8))
-  if self.craftui:
-   self.panel('CRAFTING',180,100,740,500);screen.blit(F.render('[1] Void Carbine: 12 Scrap, 6 Crystal, 4 Gear, 2 Dust',1,WHITE),(230,200));screen.blit(F.render('[2] Void Mantle: 15 Scrap, 8 Crystal, 2 Shard, 4 Dust',1,WHITE),(230,270))
-  if self.shop:
-   self.panel('DAX SHOP',180,80,740,530);ns=list(WEAPONS)+list(ARMOR)
-   for i,n in enumerate(ns):pr=WEAPONS[n][4] if n in WEAPONS else ARMOR[n][2];screen.blit(F.render(f'[{i+1}] {n:<18} {pr}g',1,WHITE),(230+(i%2)*330,150+(i//2)*65))
-  if self.dialog:
-   self.panel(self.dialog[0],70,475,960,175);screen.blit(F.render(self.dialog[1],1,WHITE),(100,530));screen.blit(S.render(self.dialog[2],1,GREY),(100,560));
-   for i,o in enumerate(self.dialog[3]):screen.blit(F.render(f'[{i+1}] {o}',1,GOLD),(100+i*280,600))
- def dungeon_draw(self):
-  screen.fill((12,12,18));screen.blit(B.render('PROCEDURAL RUIN',1,PURPLE),(350,30));size=55;ox=525;oy=350
-  for x,y in self.drooms:pygame.draw.rect(screen,(65,65,78),(ox+x*size,oy+y*size,size-4,size-4))
-  if self.drooms:x,y=self.drooms[self.dp];pygame.draw.rect(screen,GOLD,(ox+x*size+10,oy+y*size+10,30,30))
-  screen.blit(F.render('WASD: move between rooms | E: search | ESC: leave',1,WHITE),(300,640))
- def menu(self):
-  screen.fill((7,9,13));screen.blit(G.render('ASHFALL',1,WHITE),(350,90));screen.blit(B.render('REQUIEM OF THE HOLLOW KING',1,GOLD),(230,170));ls=['22 QUESTS • PROCEDURAL DUNGEONS • SKILL TREE','CRAFTING • WEAPON STATS • RANDOM EVENTS • CHOICES','THREE ENDINGS • SAVE/LOAD • LONG-FORM STORY','','ENTER New Game','L Load Game','ESC Quit']
-  for i,t in enumerate(ls):screen.blit(F.render(t,1,WHITE if i<3 else GREY),(290,250+i*42))
- def ending(self):
-  screen.fill(BLACK);screen.blit(G.render('THE HOLLOW KING IS FALLEN',1,GOLD),(220,110));screen.blit(B.render('Choose Eldoria’s future',1,WHITE),(330,210));
-  for i,t in enumerate(['Free the Ash and rebuild','Bind the Ash and rule','Destroy the Ash forever']):screen.blit(B.render(f'{i+1}. {t}',1,WHITE),(200,310+i*90))
- def victory(self):
-  n=['THE NEW DAWN','THE IRON AGE','THE SILENT WORLD'][self.flags['ending']-1];screen.fill(BLACK);screen.blit(G.render(n,1,GOLD),(300,120));screen.blit(B.render('ELDORIA HAS A NEW FUTURE',1,WHITE),(250,220));screen.blit(F.render(f'Level {self.p.level} | Kills {self.p.kills} | Gold {self.p.gold} | Days {self.day} | Playtime {self.play/3600:.1f}h',1,GREY),(280,330));screen.blit(F.render('F5 save | ESC quit',1,WHITE),(450,420))
- def save(self):
-  with open(SAVE,'w') as f:json.dump({'p':self.p.data(),'day':self.day,'hour':self.hour,'q':self.q,'flags':self.flags,'relays':self.relays,'play':self.play},f)
-  self.msg('GAME SAVED',GREEN,3)
- def load(self):
-  if not os.path.exists(SAVE):self.msg('No save file.',RED);return
-  with open(SAVE) as f:d=json.load(f)
-  self.p=P(d['p']);self.day=d['day'];self.hour=d['hour'];self.q=d['q'];self.flags=d['flags'];self.relays=d['relays'];self.play=d.get('play',0);self.state='playing';self.msg('SAVE LOADED',GREEN,3)
- def buy(self,i):
-  ns=list(WEAPONS)+list(ARMOR)
-  if i>=len(ns):return
-  n=ns[i];pr=WEAPONS[n][4] if n in WEAPONS else ARMOR[n][2]
-  if self.p.gold<pr:self.msg('Not enough gold.',RED);return
-  self.p.gold-=pr
-  if n in WEAPONS:self.p.weapon=n
-  else:self.p.armor=n
-  self.msg('Equipped '+n,GREEN)
- def events(self):
-  for e in pygame.event.get():
-   if e.type==pygame.QUIT:self.running=False
-   if e.type==pygame.KEYDOWN:
-    if self.state=='menu':
-     if e.key==pygame.K_RETURN:self.state='playing';self.msg('Mara is waiting in Haven.',CYAN,4)
-     elif e.key==pygame.K_l:self.load()
-     elif e.key==pygame.K_ESCAPE:self.running=False
-     continue
-    if self.state=='ending':
-     if e.key in (pygame.K_1,pygame.K_2,pygame.K_3):self.flags['ending']=e.key-pygame.K_0;self.state='victory';self.progress('ending','ending');self.msg('ENDING REACHED',GOLD,8)
-     continue
-    if self.state=='victory':
-     if e.key==pygame.K_F5:self.save()
-     elif e.key==pygame.K_ESCAPE:self.running=False
-     continue
-    if self.state=='dungeon':
-     if e.key==pygame.K_ESCAPE:self.state='playing';continue
-     if e.key in (pygame.K_w,pygame.K_a,pygame.K_s,pygame.K_d):
-      x,y=self.drooms[self.dp];dx=int(e.key==pygame.K_d)-int(e.key==pygame.K_a);dy=int(e.key==pygame.K_s)-int(e.key==pygame.K_w);z=(x+dx,y+dy)
-      if z in self.drooms:self.dp=self.drooms.index(z)
-     if e.key==pygame.K_e:
-      if random.random()<.5:self.p.inv['Ancient Gear']+=1;self.p.xpup(150,self);self.msg('Ancient Gear found.',GOLD)
-      else:self.en.append(E(random.choice(list(EN)),self.p.x,self.p.y,self));self.msg('AMBUSH!',RED)
-     continue
-    if self.dialog:
-     if e.key in (pygame.K_1,pygame.K_2,pygame.K_3):
-      n=e.key-pygame.K_1
-      if getattr(self,'choice',None)=='shrine':self.choice(n);self.choice=None
-      else:self.choose(n)
-     elif e.key==pygame.K_ESCAPE:self.dialog=None
-     continue
-    if self.shop:
-     if pygame.K_1<=e.key<=pygame.K_9:self.buy(e.key-pygame.K_1)
-     elif e.key==pygame.K_ESCAPE:self.shop=False
-     continue
-    if self.inv:
-     if e.key in (pygame.K_i,pygame.K_ESCAPE):self.inv=False
-     continue
-    if self.skills:
-     if e.key in (pygame.K_1,pygame.K_2,pygame.K_3):
-      n=['Might','Survival','Arcane'][e.key-pygame.K_1]
-      if sum(self.p.skills.values())<self.p.level-1:self.p.skills[n]+=1;self.msg(n+' upgraded.',GREEN)
-     elif e.key in (pygame.K_k,pygame.K_ESCAPE):self.skills=False
-     continue
-    if self.map:
-     if e.key in (pygame.K_m,pygame.K_ESCAPE):self.map=False
-     continue
-    if self.craftui:
-     if e.key==pygame.K_1:self.craft('weapon')
-     elif e.key==pygame.K_2:self.craft('armor')
-     elif e.key in (pygame.K_c,pygame.K_ESCAPE):self.craftui=False
-     continue
-    if e.key==pygame.K_ESCAPE:self.state='paused' if self.state=='playing' else 'playing'
-    elif e.key==pygame.K_F5:self.save()
-    elif e.key==pygame.K_F9:self.load()
-    elif e.key==pygame.K_i:self.inv=True
-    elif e.key==pygame.K_k:self.skills=True
-    elif e.key==pygame.K_m:self.map=True
-    elif e.key==pygame.K_c:self.craftui=True
-    elif e.key==pygame.K_e:self.interact()
-    elif e.key==pygame.K_q and self.p.inv.get('Medkit',0):self.p.inv['Medkit']-=1;self.p.hp=min(self.p.maxhp,self.p.hp+70);self.msg('Medkit used.',GREEN)
-   if e.type==pygame.MOUSEBUTTONDOWN and e.button==1 and self.state=='playing' and not(self.dialog or self.shop or self.inv or self.skills or self.map or self.craftui):self.attack()
- def draw(self):
-  if self.state=='menu':self.menu();return
-  if self.state=='ending':self.ending();return
-  if self.state=='victory':self.victory();return
-  if self.state=='dungeon':self.dungeon_draw();return
-  self.worlddraw();self.overlay()
-  if self.state=='paused':pygame.draw.rect(screen,(0,0,0,190),(0,0,W,H));screen.blit(G.render('PAUSED',1,WHITE),(420,260))
-GAME=Game();GAME.running=True
-while GAME.running:
- dt=min(.05,clock.tick(60)/1000);GAME.events();GAME.update(dt);GAME.draw();pygame.display.flip()
-pygame.quit()
+    def __init__(self):
+        self.p = Player(); self.day = 1; self.hour = 8; self.running = True
+        self.quests = {q[0]: {'done': False, 'progress': 0} for q in QUESTS}
+        self.relations = {'Mara': 0, 'Dax': 0, 'Sera': 0, 'Rook': 0, 'Finch': 0}
+        self.flags = {}; self.event_cooldown = 0; self.dungeon = None
+
+    def save(self):
+        data = {'player': self.p.pack(), 'day': self.day, 'hour': self.hour, 'quests': self.quests, 'relations': self.relations, 'flags': self.flags}
+        with open(SAVE, 'w') as f: json.dump(data, f, indent=2)
+        print('Game saved.')
+
+    def load(self):
+        if not os.path.exists(SAVE): print('No save exists.'); return
+        try:
+            with open(SAVE) as f: d = json.load(f)
+            self.p = Player(d['player']); self.day = d['day']; self.hour = d['hour']; self.quests = d['quests']; self.relations = d['relations']; self.flags = d['flags']
+            print('Save loaded.')
+        except Exception as e: print('Save is damaged:', e)
+
+    def advance(self, hours=1):
+        self.hour += hours
+        while self.hour >= 24: self.hour -= 24; self.day += 1
+        self.event_cooldown -= hours
+        if self.hour >= 21 or self.hour < 6: self.night_event()
+
+    def header(self):
+        print('\n' + '=' * 78)
+        print(f'ASHFALL | Day {self.day} {int(self.hour):02d}:00 | LV {self.p.level} | HP {self.p.hp}/{self.p.max_hp} | GOLD {self.p.gold}')
+        print(f'{self.p.weapon}  POW {self.p.power}  |  {self.p.armour}  DEF {self.p.defence}  |  Region: {self.region()}')
+        print('=' * 78)
+
+    def region(self):
+        return self.flags.get('region', 'Haven')
+
+    def say(self, who, text):
+        print(f'\n{who}: "{text}"')
+
+    def choose(self, prompt, options):
+        print('\n' + prompt)
+        for i, option in enumerate(options, 1): print(f'  [{i}] {option}')
+        while True:
+            a = input('> ').strip()
+            if a.isdigit() and 1 <= int(a) <= len(options): return int(a)
+            print('Choose a number from the list.')
+
+    def start(self):
+        print('\n' + '#' * 78)
+        print('#' + ' ASHFALL: REQUIEM OF THE HOLLOW KING '.center(76) + '#')
+        print('#' * 78)
+        print('\nThe sky has been broken for seventy years.')
+        print('Eldoria survives beneath a permanent storm of silver ash.')
+        print('You wake outside Haven carrying a rusted blade and a message:')
+        print('\n  "The machines are waking. Find the Hollow King before he finds you."')
+        while True:
+            a = self.choose('What do you do?', ['Begin the journey', 'Load a save', 'Quit'])
+            if a == 1: self.p.name = input('Your name: ').strip() or 'Wanderer'; break
+            if a == 2: self.load(); break
+            return
+        self.flags['region'] = 'Haven'
+        self.main_loop()
+
+    def main_loop(self):
+        while self.running:
+            self.header()
+            print('[1] Explore  [2] Town  [3] Quests  [4] Character')
+            print('[5] Skills   [6] Craft [7] Map    [8] Save')
+            print('[9] Rest     [0] Quit')
+            a = input('> ').strip()
+            actions = {'1': self.explore, '2': self.town, '3': self.quest_menu, '4': self.character, '5': self.skill_menu, '6': self.craft_menu, '7': self.map_menu, '8': self.save, '9': self.rest, '0': self.quit}
+            if a in actions:
+                try: actions[a]()
+                except (KeyboardInterrupt, EOFError): self.quit()
+            else: print('Unknown command.')
+
+    def explore(self):
+        region = self.region()
+        print(f'\nYou travel through {region}. The ash moves like snow around your boots.')
+        self.advance(random.choice([1, 1, 2]))
+        roll = random.random()
+        if roll < .34: self.combat()
+        elif roll < .52: self.random_event()
+        elif roll < .66: self.find_loot()
+        elif roll < .76: self.dungeon_menu()
+        elif roll < .86: self.discover()
+        else: print('The road is quiet. Too quiet.')
+
+    def combat(self, forced=None):
+        name = forced or random.choices(list(ENEMIES), weights=[25,20,14,10,6,4,3,2])[0]
+        base = ENEMIES[name]; scale = 1 + (self.p.level - 1) * .12 + self.day * .025
+        hp, dmg, xp, gold = [int(x * scale) for x in base]
+        print(f'\n!!! {name.upper()} !!!  HP {hp}  DMG {dmg}')
+        while hp > 0 and self.p.hp > 0:
+            print(f'\nYour HP {self.p.hp}/{self.p.max_hp} | Enemy HP {hp}')
+            a = self.choose('Your move:', ['Attack', 'Defend', 'Use Medkit', 'Flee'])
+            if a == 1:
+                power = self.p.power + random.randint(-3, 5)
+                if random.randint(1, 100) <= self.p.crit: power *= 2; print('CRITICAL HIT!')
+                hp -= max(1, power); print(f'You deal {max(1,power)} damage.')
+            elif a == 2:
+                dmg = max(1, dmg // 3); print('You brace for impact.')
+            elif a == 3:
+                if self.p.inv.get('Medkit', 0): self.p.inv['Medkit'] -= 1; self.p.hp = min(self.p.max_hp, self.p.hp + 45); print('You recover 45 HP.')
+                else: print('No medkits.') ; continue
+            else:
+                if random.random() < .55: print('You escape.'); return
+                print('You failed to escape!')
+            if hp > 0:
+                incoming = max(1, dmg - self.p.defence // 2)
+                self.p.hp -= incoming; print(f'{name} hits you for {incoming}.')
+        if self.p.hp <= 0:
+            self.p.hp = max(1, self.p.max_hp // 2); self.p.gold = max(0, self.p.gold - 50); self.flags['region'] = 'Haven'
+            print('You collapse and wake in Haven. You lost 50 gold.')
+            return
+        self.p.kills += 1; self.p.gold += gold; self.p.gain_xp(xp)
+        print(f'Victory! +{gold} gold, +{xp} XP.')
+        self.progress('kill', name)
+        drops = random.sample(['Iron Scrap','Ember Root','Ash Crystal','Ancient Gear','Void Dust'], k=random.randint(0,2))
+        for item in drops: self.add_item(item); print('Found:', item)
+
+    def random_event(self):
+        events = [self.event_traveller, self.event_cache, self.event_medic, self.event_mirror, self.event_ambush]
+        random.choice(events)()
+
+    def event_traveller(self):
+        self.say('Stranger', 'The road ahead is dangerous. I can tell you what I know, for a price.')
+        a = self.choose('Offer 20 gold?', ['Pay', 'Refuse', 'Threaten him'])
+        if a == 1 and self.p.gold >= 20:
+            self.p.gold -= 20; self.p.gain_xp(50); self.say('Stranger','Blackwater has started hearing voices beneath the water.')
+        elif a == 3:
+            print('He disappears into the ash. You feel watched.')
+        else: print('The stranger shrugs and leaves.')
+
+    def event_cache(self):
+        print('You discover a sealed military cache.')
+        a = self.choose('What do you do?', ['Force it open', 'Leave it', 'Search for a key'])
+        if a == 1:
+            self.add_item('Iron Scrap', 3); self.add_item('Ash Crystal'); print('You pry it open and find useful materials.')
+        elif a == 3:
+            self.advance(1); self.add_item('Ancient Gear', 2); print('A hidden key opens the cache.')
+        else: print('You leave it untouched.')
+
+    def event_medic(self):
+        self.say('Wounded Ranger','Please... I need medicine.')
+        a = self.choose('Help?', ['Give a Medkit', 'Give 15 gold', 'Walk away'])
+        if a == 1 and self.p.inv.get('Medkit',0): self.p.inv['Medkit'] -= 1; self.relations['Sera'] += 2; self.p.gain_xp(60); print('The ranger survives.')
+        elif a == 2 and self.p.gold >= 15: self.p.gold -= 15; self.relations['Sera'] += 1; print('She thanks you.')
+        else: print('You continue alone.')
+
+    def event_mirror(self):
+        self.say('The Mirror','You have walked this road before. You simply do not remember.')
+        a = self.choose('The mirror asks for a memory.', ['Touch it', 'Break it', 'Walk away'])
+        if a == 1: self.p.flags['mirror'] = True; self.p.gain_xp(100); print('You see a flash of the old world.')
+        elif a == 2: self.add_item('Void Dust',2); print('The mirror cracks and releases dark dust.')
+
+    def event_ambush(self):
+        print('A pack of scavengers surrounds you!')
+        self.combat('Scavenger')
+        if self.p.hp > 0 and random.random() < .5: self.combat('Scavenger')
+
+    def find_loot(self):
+        items = random.choices(['Iron Scrap','Ember Root','Ash Crystal','Ancient Gear','Moon Shard'], [35,25,20,15,5], k=random.randint(1,3))
+        for item in items: self.add_item(item); print('You found', item)
+
+    def discover(self):
+        undiscovered = [r for r in REGIONS if r not in self.p.regions]
+        if undiscovered:
+            r = random.choice(undiscovered); self.flags['region'] = r; self.p.regions.append(r); self.progress('region', r); print('DISCOVERED:', r)
+        else: print('You discover an abandoned camp. Nothing remains.')
+
+    def dungeon_menu(self):
+        print('\nA staircase descends beneath the ruins. Symbols glow on the walls.')
+        self.procedural_dungeon(random.randint(3,7))
+
+    def procedural_dungeon(self, rooms):
+        names = ['Flooded Hall','Machine Chapel','Collapsed Archive','Ash Garden','Forgotten Barracks','Glass Corridor','Engine Vault']
+        print(f'\n=== PROCEDURAL DUNGEON: {rooms} ROOMS ===')
+        for i in range(1, rooms+1):
+            print(f'\nRoom {i}/{rooms}: {random.choice(names)}')
+            roll = random.random()
+            if roll < .4: self.combat()
+            elif roll < .7: self.find_loot()
+            else:
+                a = self.choose('A strange mechanism blocks the path.', ['Solve it', 'Force it', 'Search nearby'])
+                if a == 1: self.p.gain_xp(80); self.add_item('Ancient Gear'); print('Puzzle solved.')
+                elif a == 2: self.p.hp -= random.randint(5,20); print('The mechanism shocks you.')
+                else: self.add_item(random.choice(['Iron Scrap','Ash Crystal']))
+            if self.p.hp <= 0: break
+        if self.p.hp > 0:
+            print('\nYou reach the dungeon heart. An ancient machine speaks your name.')
+            self.p.gain_xp(200); self.add_item('Moon Shard'); self.progress('dungeon', 'ruin')
+
+    def town(self):
+        while True:
+            print('\n=== HAVEN ===')
+            print('Mara watches the gates. Dax sorts equipment. Sera treats the wounded. Rook studies maps. Finch sits beside a dead machine.')
+            a = self.choose('Who do you visit?', ['Mara - quests', 'Dax - shop', 'Sera - healing', 'Rook - rumours', 'Finch - history', 'Leave'])
+            if a == 1: self.mara()
+            elif a == 2: self.shop()
+            elif a == 3: self.heal()
+            elif a == 4: self.rook()
+            elif a == 5: self.finch()
+            else: return
+
+    def mara(self):
+        self.say('Mara','Eldoria is dying. The Hollow King is not a monster. He is what is left of our first king.')
+        pending = [q for q in QUESTS if not self.quests[q[0]]['done']]
+        if pending:
+            q = pending[0]; self.say('Mara', f'Quest: {q[0]} — {q[1]}')
+            if self.choose('Accept?', ['Accept', 'Not now']) == 1: self.quests[q[0]]['accepted'] = True; print('Quest tracked.')
+        else: print('Mara: You have completed every known quest.')
+
+    def shop(self):
+        stock = list(WEAPONS.keys())[1:] + list(ARMOUR.keys())[1:] + ['Medkit']
+        while True:
+            print('\n=== DAX\'S SHOP ===')
+            for i,n in enumerate(stock,1):
+                price = WEAPONS[n]['value'] if n in WEAPONS else ARMOUR[n]['value'] if n in ARMOUR else 25
+                print(f'[{i}] {n:<18} {price}g')
+            print('[0] Leave')
+            a=input('> ').strip()
+            if a=='0': return
+            if a.isdigit() and 1<=int(a)<=len(stock):
+                n=stock[int(a)-1]; price=WEAPONS[n]['value'] if n in WEAPONS else ARMOUR[n]['value'] if n in ARMOUR else 25
+                if self.p.gold < price: print('Not enough gold.'); continue
+                self.p.gold -= price
+                if n in WEAPONS: self.p.weapon=n
+                elif n in ARMOUR: self.p.armour=n; self.p.max_hp=max(self.p.max_hp,100+ARMOUR[n]['hp'])
+                else: self.add_item('Medkit')
+                print('Purchased',n)
+
+    def heal(self):
+        cost=15
+        if self.p.gold>=cost: self.p.gold-=cost; self.p.hp=self.p.max_hp; print('Sera restores you to full health.')
+        else: print('You need 15 gold.')
+
+    def rook(self):
+        self.say('Rook','The Crater is a door. The Warden keeps the first key. Mother of Ash keeps the second.')
+        a=self.choose('Ask about the Hollow King?', ['Yes','No'])
+        if a==1: self.say('Rook','The King wants the world restored. The problem is that restoration means everyone remembers the Ashfall.')
+        self.relations['Rook'] += 1
+
+    def finch(self):
+        self.say('Finch','Before the Ashfall, Eldoria built a machine called the Dawn Engine.')
+        a=self.choose('Ask how it failed?', ['Tell me everything','Another time'])
+        if a==1:
+            self.say('Finch','The engine was built to rewrite reality. The first king used it once. The sky never recovered.')
+            self.progress('choice','history')
+
+    def quest_menu(self):
+        print('\n=== QUEST LOG ===')
+        for i,q in enumerate(QUESTS,1):
+            st=self.quests[q[0]]; mark='DONE' if st['done'] else 'ACTIVE' if st.get('accepted') else 'LOCKED'
+            print(f'{i:02}. [{mark:<6}] {q[0]} — {q[1]}')
+        input('Press Enter...')
+
+    def character(self):
+        print('\n=== CHARACTER ===')
+        print('Name:',self.p.name,' Level:',self.p.level,' XP:',self.p.xp,'/',self.p.need)
+        print('Weapon:',self.p.weapon,WEAPONS[self.p.weapon]); print('Armour:',self.p.armour,ARMOUR[self.p.armour])
+        print('Skills:',self.p.skills); print('Inventory:',self.p.inv)
+        print('Kills:',self.p.kills,' Crafted:',self.p.crafted,' Regions:',', '.join(self.p.regions) or 'None')
+        input('Press Enter...')
+
+    def skill_menu(self):
+        print('\n=== SKILL TREE ===')
+        print('Every level grants 1 skill point. Current levels:',self.p.skills)
+        print('[1] Might    +5 power per rank')
+        print('[2] Survival +3 defence per rank')
+        print('[3] Insight  +3% critical chance per rank')
+        a=input('Spend point (1-3, or Enter to leave): ').strip()
+        if a in ('1','2','3'):
+            key=['Might','Survival','Insight'][int(a)-1]
+            spent=sum(self.p.skills.values())
+            if spent < self.p.level-1: self.p.skills[key]+=1; print(key,'increased!')
+            else: print('You have no unspent skill points.')
+
+    def craft_menu(self):
+        recipes = [
+            ('Hardened Blade','weapon',{'Iron Scrap':6,'Ancient Gear':2,'Ash Crystal':2}),
+            ('Ranger Bow','weapon',{'Iron Scrap':8,'Ember Root':3,'Ash Crystal':2}),
+            ('Storm Rifle','weapon',{'Iron Scrap':12,'Ancient Gear':5,'Void Dust':2}),
+            ('Void Carbine','weapon',{'Ancient Gear':10,'Moon Shard':4,'Void Dust':6}),
+            ('Ranger Mail','armour',{'Iron Scrap':10,'Ember Root':5}),
+            ('Aegis Plate','armour',{'Iron Scrap':15,'Ancient Gear':8,'Ash Crystal':5}),
+            ('Void Mantle','armour',{'Moon Shard':6,'Void Dust':10,'Ancient Gear':10}),
+        ]
+        print('\n=== CRAFTING ===')
+        for i,(n,k,cost) in enumerate(recipes,1): print(i,n,'|',', '.join(f'{x} x{y}' for x,y in cost.items()))
+        a=input('Recipe number (Enter leaves): ').strip()
+        if not a.isdigit() or not 1<=int(a)<=len(recipes): return
+        n,k,cost=recipes[int(a)-1]
+        if any(self.p.inv.get(x,0)<y for x,y in cost.items()): print('Not enough materials.'); return
+        for x,y in cost.items(): self.p.inv[x]-=y
+        if k=='weapon':
+            if n=='Hardened Blade':
+                WEAPONS['Hardened Blade']={'power':22,'speed':3,'crit':7,'value':500,'tag':'crafted'}
+            self.p.weapon=n
+        else: self.p.armour=n
+        self.p.crafted+=1; self.p.gain_xp(180); print('Crafted',n)
+        self.progress('craft',k)
+
+    def map_menu(self):
+        print('\n=== MAP ===')
+        print('Haven       [safe]')
+        print('Deadwood    [forests and ruins]')
+        print('Salt Flats  [old military roads]')
+        print('Blackwater  [flooded industrial zone]')
+        print('The Crater  [endgame zone]')
+        print('Visited:', ', '.join(self.p.regions) or 'Haven only')
+
+    def rest(self):
+        print('You rest behind Haven\'s walls.')
+        self.p.hp=self.p.max_hp; self.advance(8); self.random_event() if random.random()<.3 else print('You sleep peacefully.')
+
+    def add_item(self,item,n=1): self.p.inv[item]=self.p.inv.get(item,0)+n
+
+    def progress(self, kind, target, amount=1):
+        for q in QUESTS:
+            name,desc,k,t,need,reward=q
+            if k!=kind or t!=target: continue
+            st=self.quests[name]
+            if st['done']: continue
+            if k=='item': st['progress']=min(need,self.p.inv.get(t,0))
+            elif k=='gold': st['progress']=min(need,self.p.gold)
+            elif k=='explore': st['progress']=len(self.p.regions)
+            else: st['progress']=min(need,st['progress']+amount)
+            if st['progress']>=need:
+                st['done']=True; self.p.gold+=reward; self.p.gain_xp(reward//2); print(f'QUEST COMPLETE: {name} (+{reward}g)')
+
+    def night_event(self):
+        if self.event_cooldown>0 or self.region()=='Haven': return
+        self.event_cooldown=3
+        print('\nThe ash becomes luminous. Something moves beyond the firelight.')
+        if random.random()<.35: self.combat(random.choice(['Ash Witch','Void Hound','Scavenger']))
+
+    def boss(self,name):
+        hp,dmg,xp,gold=BOSSES[name]
+        hp=int(hp*(1+self.p.level*.08))
+        print(f'\n=== BOSS: {name.upper()} ===')
+        print('HP:',hp,'Damage:',dmg)
+        while hp>0 and self.p.hp>0:
+            a=self.choose('Boss phase:', ['Attack','Defend','Medkit','Special action'])
+            if a==1:
+                dam=self.p.power+random.randint(0,8); hp-=dam; print('You strike for',dam)
+            elif a==2: dmg=max(1,dmg//3); print('You brace.')
+            elif a==3 and self.p.inv.get('Medkit',0): self.p.inv['Medkit']-=1; self.p.hp=min(self.p.max_hp,self.p.hp+50); print('Recovered 50 HP.')
+            else:
+                if self.p.skills['Insight']>=2: hp-=self.p.power*2; print('You exploit a weakness!')
+                else: print('You have no special action available.')
+            if hp>0:
+                incoming=max(1,dmg-self.p.defence//2); self.p.hp-=incoming; print(name,'deals',incoming)
+        if self.p.hp<=0: print('You were defeated.'); self.p.hp=self.p.max_hp//2; self.flags['region']='Haven'; return
+        self.p.gold+=gold; self.p.gain_xp(xp); self.add_item('Moon Shard',2); print('BOSS DEFEATED!')
+        self.progress('boss',name)
+        if name=='The Warden': self.add_item('Warden Core'); self.flags['warden']=True
+        if name=='Mother of Ash': self.flags['mother']=True
+        if name=='Hollow King': self.final_choice()
+
+    def final_choice(self):
+        self.progress('event','king')
+        print('\nThe Hollow King falls. The Dawn Engine wakes beneath the vault.')
+        self.say('Hollow King','You can destroy it, rule it, or finish what I started.')
+        a=self.choose('The fate of Eldoria is yours.', ['Destroy the Dawn Engine', 'Use it to restore the world', 'Bind it to yourself', 'Walk away'])
+        endings=['FREEDOM','RESTORATION','ASCENSION','EXILE']
+        self.flags['ending']=endings[a-1]
+        self.progress('ending','ending')
+        print('\n' + '='*60); print('ENDING:',self.flags['ending']); print('='*60)
+        if a==1: print('You destroy the machine. The ash begins to fall normally for the first time in seventy years.')
+        elif a==2: print('The sky clears. Eldoria remembers everything it lost, and begins rebuilding.')
+        elif a==3: print('You become the new keeper of the Dawn Engine. The world survives, but your humanity changes.')
+        else: print('You leave the machine untouched. Eldoria remains dangerous, but its future belongs to ordinary people.')
+        print('\nYou completed the main story. You can continue exploring, finish side quests, or quit.')
+
+    def quit(self):
+        a=self.choose('Save before quitting?', ['Save and quit','Quit without saving','Cancel'])
+        if a==1: self.save(); self.running=False
+        elif a==2: self.running=False
+
+if __name__ == '__main__':
+    Game().start()
